@@ -1,0 +1,280 @@
+# Install ingress-nginx controller
+# kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v0.44.0/deploy/static/provider/cloud/deploy.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: nginx
+  name: nginx
+spec:
+#  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: nginx
+      annotations:
+        name: nginx
+    spec:
+      containers:
+      - image: nginx:alpine
+        name: nginx
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            cpu: 256m
+            memory: 256Mi
+          limits:
+            cpu: 512m
+            memory: 512Mi
+        volumeMounts:
+        #- name:  nginx-pv-storage
+#        - name:  cache-volume
+#          mountPath:  /usr/share/nginx/html
+        - name: podinfo
+          mountPath: /usr/share/nginx/html/info
+
+      volumes:
+#      - name: cache-volume
+#        emptyDir: {}
+      - name: podinfo
+        downwardAPI:
+          items:
+            - path: "uid.html"
+              fieldRef:
+                fieldPath: metadata.uid
+            - path: "info.html"
+              fieldRef:
+                fieldPath: metadata.annotations
+      #- name: nginx-pv-storage
+      #  persistentVolumeClaim:
+      #    claimName: nginx-pv-claim
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-cip
+  namespace: default
+spec:
+  selector:
+    app: nginx
+  type: ClusterIP
+  ports:
+  - name: nginx-cip
+    protocol: TCP
+    port: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-lb
+  namespace: default
+spec:
+  selector:
+    app: nginx
+  type: LoadBalancer
+  ports:
+  - name: nginx-lb
+    protocol: TCP
+    port: 80
+#---
+#apiVersion: v1
+#kind: PersistentVolume
+#metadata:
+#  name: snd-pv-volume
+#  labels:
+#    type: local
+#spec:
+#  storageClassName: manual
+#  capacity:
+#    storage: 50Mi
+#  accessModes:
+#    - ReadWriteOnce
+#  hostPath:
+#    path: "/Users/joao/Projects/Udemy/udemy-docker-mastery/www/snd"
+#---
+#apiVersion: v1
+#kind: PersistentVolume
+#metadata:
+#  name: fst-pv-volume
+#  labels:
+#    type: local
+#spec:
+#  storageClassName: manual
+#  capacity:
+#    storage: 50Mi
+#  accessModes:
+#    - ReadWriteOnce
+#  hostPath:
+#    path: "/Users/joao/Projects/Udemy/udemy-docker-mastery/www/fst"
+---
+#apiVersion: v1
+#kind: PersistentVolumeClaim
+#metadata:
+#  name: nginx-pv-claim
+#spec:
+#  storageClassName: manual
+#  accessModes:
+#    - ReadWriteOnce
+#  resources:
+#    requests:
+#      storage: 50Mi
+#---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: minimal-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /nginx(/|$)(.*)
+        pathType: Prefix
+        backend:
+          service:
+            name: nginx-lb
+            port:
+              number: 80
+      - path: /httpd(/|$)(.*)
+        pathType: Prefix
+        backend:
+          service:
+            name: httpd-lb
+            port:
+              number: 80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: httpd
+  name: httpd
+  annotations:
+    name: httpd
+spec:
+#  replicas: 2
+  selector:
+    matchLabels:
+      app: httpd
+  strategy: {}
+  template:
+    metadata:
+      labels:
+        app: httpd
+    spec:
+      containers:
+      - image: httpd:alpine
+        name: httpd
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            cpu: 256m
+            memory: 256Mi
+          limits:
+            cpu: 512m
+            memory: 512Mi
+        volumeMounts:
+        - name: podinfo
+          mountPath: /usr/local/apache2/htdocs/info
+      volumes:
+#      - name: cache-volume
+#        emptyDir: {}
+      - name: podinfo
+        downwardAPI:
+          items:
+            - path: "uid.html"
+              fieldRef:
+                fieldPath: metadata.uid
+            - path: "info.html"
+              fieldRef:
+                fieldPath: metadata.annotations
+#      - name: httpd-pv-storage
+#        persistentVolumeClaim:
+#          claimName: httpd-pv-claim
+
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: httpd-cip
+  namespace: default
+spec:
+  selector:
+    app: httpd
+  type: ClusterIP
+  ports:
+  - name: httpd-cip
+    protocol: TCP
+    port: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: httpd-lb
+  namespace: default
+spec:
+  selector:
+    app: httpd
+  type: LoadBalancer
+  ports:
+  - name: httpd-lb
+    protocol: TCP
+    port: 80
+---
+#apiVersion: v1
+#kind: PersistentVolumeClaim
+#metadata:
+#  name: httpd-pv-claim
+#spec:
+#  storageClassName: manual
+#  accessModes:
+#    - ReadWriteOnce
+#  resources:
+#    requests:
+#      storage: 50Mi
+apiVersion: autoscaling/v2beta2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: nginx-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: nginx
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 20
+---
+apiVersion: autoscaling/v2beta2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: httpd-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: httpd
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 5
